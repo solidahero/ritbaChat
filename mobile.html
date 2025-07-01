@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <title>Mobile Chat</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-  <link rel="stylesheet" href="../renderer/public/css/global.css">
   <style>
     html, body {
       background: #232323;
@@ -21,7 +20,6 @@
       flex-direction: column-reverse;
       gap: 8px;
       padding: 12px;
-      height: 80vh;
       overflow-y: auto;
       background: #232323;
       border-radius: 10px;
@@ -35,12 +33,18 @@
       font-size: 1.1em;
       word-break: break-word;
       display: flex;
-      align-items: center;
+      flex-direction: column;
       gap: 8px;
     }
     .mobile-chat-username {
       font-weight: bold;
       margin-right: 6px;
+    }
+    .mobile-chat-username-div {
+      /* should be on the left side and not in the middle so its easier to read */
+      display: flex;
+      flex-direction: row;
+      gap: 8px;
     }
     .mobile-chat-profile {
       width: 32px;
@@ -62,7 +66,14 @@
   <div id="mobile-chat-messages"></div>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script>
-    const socket = io(window.location.origin);
+    // const socket = io("localhost:12345", {
+    const socketUrl = window.location.href.split(":")[1] + ":12345";
+    const socket = io(socketUrl, {
+      transports: ['websocket'],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000
+    });
     function escapeHtml(text) {
       const div = document.createElement('div');
       div.textContent = text;
@@ -71,48 +82,108 @@
     socket.on('connect', () => {
       console.log('Connected to chat server!');
     });
-    socket.on('message', (data) => {
+    function renderChatMessage(data) {
       if (!data || data.type !== 'chat') return;
       const chatDiv = document.createElement('div');
       chatDiv.className = 'mobile-chat-msg';
-      // Profile image
+      const usernameDiv = document.createElement('div');
+      usernameDiv.className = 'mobile-chat-username-div';
+      chatDiv.appendChild(usernameDiv);
+
+      // --- Profile image (YouTube/Twitch fallback) ---
+      let profileImageUrl = null;
       if (data.profileImage) {
+        profileImageUrl = data.profileImage;
+      } else if (data.website === 'youtube' && data.authorName) {
+        const hash = Array.from(data.authorName).reduce((acc, c) => acc + c.charCodeAt(0), 0);
+        const color = ['#e57373','#64b5f6','#81c784','#ffd54f','#ba68c8','#4db6ac','#f06292'][hash % 7];
+        const svg = `<svg width='32' height='32' xmlns='http://www.w3.org/2000/svg'><rect width='32' height='32' rx='16' fill='${color}'/><text x='16' y='22' font-size='16' text-anchor='middle' fill='#fff' font-family="Segoe UI,Arial">${escapeHtml(data.authorName[1] ? data.authorName[1].toUpperCase() : '?')}</text></svg>`;
+        profileImageUrl = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+      } else if (data.website === 'twitch' && data.authorName) {
+        profileImageUrl = 'https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png';
+      }
+      if (profileImageUrl) {
         const img = document.createElement('img');
-        img.src = data.profileImage;
+        img.src = profileImageUrl;
         img.className = 'mobile-chat-profile';
-        chatDiv.appendChild(img);
+        usernameDiv.appendChild(img);
       }
-      // Badge (YouTube membership)
-      if (data.membership && data.membership.thumbnail) {
-        const badge = document.createElement('img');
-        badge.src = data.membership.thumbnail;
-        badge.className = 'mobile-chat-badge';
-        chatDiv.appendChild(badge);
-      }
-      // Username
       const userSpan = document.createElement('span');
       userSpan.className = 'mobile-chat-username';
-      userSpan.textContent = data.username || data.authorName || '';
-      chatDiv.appendChild(userSpan);
+      userSpan.textContent = data.authorName || '';
+      usernameDiv.appendChild(userSpan);
+
+      if (data.isModerator) {
+        userSpan.style.color = "blue";
+        console.log('User is a moderator:', data.authorName);
+        const modBadge = document.createElement("span");
+        modBadge.className = 'mobile-chat-badge';
+        modBadge.textContent = '🛡️';
+        usernameDiv.appendChild(modBadge);
+      }
+      if (data.isVerified) {
+        console.log('User is verified:', data.authorName);
+        const verifiedBadge = document.createElement("span");
+        verifiedBadge.className = 'mobile-chat-badge';
+        verifiedBadge.textContent = '✔️';
+        usernameDiv.appendChild(verifiedBadge);
+      }
+
+      if (data.isMember) {
+        userSpan.style.color = "green";
+        console.log('User is a member:', data.authorName);
+        if (data.website === 'twitch') {
+          const badge = document.createElement("span")
+          badge.className = 'mobile-chat-badge';
+          badge.textContent = '⭐';
+          usernameDiv.appendChild(badge);
+          console.log('Twitch member badge added for:', data.authorName);
+        } else {
+          const badgeImg = document.createElement('img');
+          badgeImg.src = data.membership.thumbnail;
+          badgeImg.className = 'mobile-chat-badge';
+          usernameDiv.appendChild(badgeImg);
+        } 
+      }
+
       // Message (handle HTML/emoji)
-      if (data.html) {
-        chatDiv.innerHTML += data.message;
-      } else if (Array.isArray(data.messages)) {
+      const messageSpan = document.createElement('span');
+      messageSpan.style.flex = '1';
+      if (Array.isArray(data.messages)) {
         data.messages.forEach(msg => {
-          if (msg.text) chatDiv.innerHTML += escapeHtml(msg.text) + ' ';
+          if (msg.text) messageSpan.innerHTML += escapeHtml(msg.text) + ' ';
           if (msg.emoji && msg.emoji.image && msg.emoji.image.thumbnails && msg.emoji.image.thumbnails[0]) {
-            chatDiv.innerHTML += `<img src="${msg.emoji.image.thumbnails[0].url}" style="height:1.5em;width:1.5em;vertical-align:middle;">`;
+            messageSpan.innerHTML += `<img src="${msg.emoji.image.thumbnails[0].url}" style="height:1.5em;width:1.5em;vertical-align:middle;">`;
           }
         });
       } else if (data.message) {
-        chatDiv.innerHTML += escapeHtml(data.message);
+        messageSpan.innerHTML += escapeHtml(data.message);
       }
+      chatDiv.appendChild(messageSpan);
       const chatMessages = document.getElementById('mobile-chat-messages');
       chatMessages.appendChild(chatDiv);
+    }
+
+    socket.on('mobile', (data) => {
+      console.log('Received mobile chat message:', data);
+      renderChatMessage(data);
       // Limit to 100 messages
+      const chatMessages = document.getElementById('mobile-chat-messages');
       while (chatMessages.children.length > 100) {
         chatMessages.removeChild(chatMessages.firstChild);
       }
+    });
+    socket.on('allChatMessages', (messages) => {
+      console.log('Received all chat messages:', messages);
+      const chatMessages = document.getElementById('mobile-chat-messages');
+      // Remove all current messages
+      while (chatMessages.firstChild) {
+        chatMessages.removeChild(chatMessages.firstChild);
+      }
+      // Add each message (oldest first, so reverse)
+      messages.slice().reverse().forEach(data => {
+        renderChatMessage(data);
+      });
     });
     socket.on('disconnect', () => {
       console.log('Disconnected from chat server!');
