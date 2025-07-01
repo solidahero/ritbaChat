@@ -41,7 +41,6 @@
       margin-right: 6px;
     }
     .mobile-chat-username-div {
-      /* should be on the left side and not in the middle so its easier to read */
       display: flex;
       flex-direction: row;
       gap: 8px;
@@ -81,6 +80,7 @@
     }
     socket.on('connect', () => {
       console.log('Connected to chat server!');
+      socket.emit("mobile-join");
     });
     function renderChatMessage(data) {
       if (!data || data.type !== 'chat') return;
@@ -90,7 +90,6 @@
       usernameDiv.className = 'mobile-chat-username-div';
       chatDiv.appendChild(usernameDiv);
 
-      // --- Profile image (YouTube/Twitch fallback) ---
       let profileImageUrl = null;
       if (data.profileImage) {
         profileImageUrl = data.profileImage;
@@ -146,7 +145,6 @@
         } 
       }
 
-      // Message (handle HTML/emoji)
       const messageSpan = document.createElement('span');
       messageSpan.style.flex = '1';
       if (Array.isArray(data.messages)) {
@@ -167,7 +165,6 @@
     socket.on('mobile', (data) => {
       console.log('Received mobile chat message:', data);
       renderChatMessage(data);
-      // Limit to 100 messages
       const chatMessages = document.getElementById('mobile-chat-messages');
       while (chatMessages.children.length > 100) {
         chatMessages.removeChild(chatMessages.firstChild);
@@ -176,11 +173,9 @@
     socket.on('allChatMessages', (messages) => {
       console.log('Received all chat messages:', messages);
       const chatMessages = document.getElementById('mobile-chat-messages');
-      // Remove all current messages
       while (chatMessages.firstChild) {
         chatMessages.removeChild(chatMessages.firstChild);
       }
-      // Add each message (oldest first, so reverse)
       messages.slice().reverse().forEach(data => {
         renderChatMessage(data);
       });
